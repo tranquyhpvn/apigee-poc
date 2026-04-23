@@ -20,20 +20,22 @@
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-antrun-plugin</artifactId>
-        <version>3.1.0</version>
+        <artifactId>maven-resources-plugin</artifactId>
+        <version>3.3.1</version>
         <executions>
           <execution>
-            <id>zip-apiproxy</id>
+            <id>copy-apiproxy</id>
             <phase>prepare-package</phase>
-            <goals><goal>run</goal></goals>
+            <goals><goal>copy-resources</goal></goals>
             <configuration>
-              <target>
-                <mkdir dir="${project.build.directory}"/>
-                <zip destfile="${project.build.directory}/${project.artifactId}-${project.version}.zip">
-                  <zipfileset dir="${project.basedir}" includes="apiproxy/**"/>
-                </zip>
-              </target>
+              <outputDirectory>${project.build.directory}/apiproxy</outputDirectory>
+              <overwrite>true</overwrite>
+              <resources>
+                <resource>
+                  <directory>${project.basedir}/apiproxy</directory>
+                  <filtering>true</filtering>
+                </resource>
+              </resources>
             </configuration>
           </execution>
         </executions>
