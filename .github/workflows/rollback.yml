@@ -33,6 +33,9 @@ jobs:
         with:
           name: backup-manifest-${{ github.event.inputs.environment }}-${{ github.event.inputs.run_id }}
           path: .
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.inputs.run_id }}
 
       - name: Show manifest being restored
         run: cat backup-manifest.json | jq '{proxy, env, revision, timestamp}'
