@@ -12,7 +12,7 @@
   <name>sample-api</name>
 
   <properties>
-    <apigee.apiversion>googleapi</apigee.apiversion>
+    <apigee.apiversion>v1</apigee.apiversion>
     <apigee.hosturl>https://apigee.googleapis.com</apigee.hosturl>
     <apigee.options>override</apigee.options>
   </properties>
