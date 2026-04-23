@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<KeyValueMapOperations
+    name="KV-LookupBackendUrl"
+    mapIdentifier="sample-api-config">
+    <ExpiryTimeInSecs>300</ExpiryTimeInSecs>
+    <Get assignTo="private.backend_url" index="1">
+        <Key>
+            <Parameter>backend-url</Parameter>
+        </Key>
+    </Get>
+</KeyValueMapOperations>

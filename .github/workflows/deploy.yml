@@ -1,0 +1,284 @@
+# ============================================================================
+# deploy.yml — Apigee proxy deploy pipeline with lint + backup/restore
+# ============================================================================
+name: Apigee Deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['apiproxy/**', 'env/**', 'pom.xml']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: uat
+        type: choice
+        options: [uat, preprod, prod]
+
+env:
+  PROXY_NAME: sample-api
+  JAVA_VERSION: '17'
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────
+  # Job 1: Lint — apigeelint + eslint
+  # ────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint proxy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install apigeelint
+        run: npm install -g apigeelint
+
+      - name: Run apigeelint
+        run: apigeelint -s apiproxy/ -f table.js
+
+      - name: Install eslint (if JS resources exist)
+        run: |
+          if [ -d "apiproxy/resources/jsc" ] && [ -n "$(ls -A apiproxy/resources/jsc 2>/dev/null)" ]; then
+            npm install -g eslint
+          fi
+
+      - name: Run eslint on JS resources
+        run: |
+          if [ -d "apiproxy/resources/jsc" ] && [ -n "$(ls -A apiproxy/resources/jsc 2>/dev/null)" ]; then
+            eslint apiproxy/resources/jsc/*.js
+          else
+            echo "No JS resources found, skipping eslint"
+          fi
+
+      - name: Upload lint results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apigeelint-results
+          path: '*.json'
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Job 2: Deploy to UAT
+  # ────────────────────────────────────────────────────────────────────────
+  deploy_uat:
+    name: Deploy to UAT
+    runs-on: ubuntu-latest
+    needs: lint
+    environment: uat
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Backup current state
+        run: |
+          ./scripts/backup.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_UAT }}" \
+            "${{ env.PROXY_NAME }}" \
+            backup-manifest.json
+
+      - name: Check routing conflicts
+        id: change_report
+        run: |
+          TOKEN=$(gcloud auth print-access-token)
+          CURRENT_REV=$(jq -r '.revision' backup-manifest.json)
+          NEEDS_SEQUENCE=$(curl -sf -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/environments/${{ secrets.APIGEE_ENV_UAT }}/apis/${{ env.PROXY_NAME }}/revisions/${CURRENT_REV}/deployments:generateDeployChangeReport" | \
+            jq '[.routingChanges[]?.shouldSequenceRollout] | any' 2>/dev/null || echo "false")
+          echo "needs_sequence=${NEEDS_SEQUENCE}" >> "$GITHUB_OUTPUT"
+          echo "Sequenced rollout needed: ${NEEDS_SEQUENCE}"
+
+      - name: Deploy proxy (Maven — package + deploy via UAT profile)
+        run: |
+          mvn install -P uat \
+            -Dapigee.org="${{ secrets.APIGEE_ORG }}" \
+            -Dapigee.sequencedRollout="${{ steps.change_report.outputs.needs_sequence }}" \
+            -Dbearer="$(gcloud auth print-access-token)"
+
+      - name: Health check
+        run: |
+          ./scripts/health-check.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_UAT }}" \
+            "${{ env.PROXY_NAME }}"
+
+      - name: Restore on failure
+        if: failure()
+        run: |
+          echo "==> Deploy or health check failed — triggering restore..."
+          ./scripts/restore.sh backup-manifest.json
+
+      - name: Upload backup manifest
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-manifest-uat-${{ github.run_id }}
+          path: backup-manifest.json
+          retention-days: 30
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Job 3: Deploy to PreProd (approval gate)
+  # ────────────────────────────────────────────────────────────────────────
+  deploy_preprod:
+    name: Deploy to PreProd
+    runs-on: ubuntu-latest
+    needs: deploy_uat
+    environment: preprod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Backup current state
+        run: |
+          ./scripts/backup.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_PREPROD }}" \
+            "${{ env.PROXY_NAME }}" \
+            backup-manifest.json
+
+      - name: Check routing conflicts
+        id: change_report
+        run: |
+          TOKEN=$(gcloud auth print-access-token)
+          CURRENT_REV=$(jq -r '.revision' backup-manifest.json)
+          NEEDS_SEQUENCE=$(curl -sf -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/environments/${{ secrets.APIGEE_ENV_PREPROD }}/apis/${{ env.PROXY_NAME }}/revisions/${CURRENT_REV}/deployments:generateDeployChangeReport" | \
+            jq '[.routingChanges[]?.shouldSequenceRollout] | any' 2>/dev/null || echo "false")
+          echo "needs_sequence=${NEEDS_SEQUENCE}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy proxy (Maven — package + deploy via preprod profile)
+        run: |
+          mvn install -P preprod \
+            -Dapigee.org="${{ secrets.APIGEE_ORG }}" \
+            -Dapigee.sequencedRollout="${{ steps.change_report.outputs.needs_sequence }}" \
+            -Dbearer="$(gcloud auth print-access-token)"
+
+      - name: Health check
+        run: |
+          ./scripts/health-check.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_PREPROD }}" \
+            "${{ env.PROXY_NAME }}"
+
+      - name: Restore on failure
+        if: failure()
+        run: ./scripts/restore.sh backup-manifest.json
+
+      - name: Upload backup manifest
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-manifest-preprod-${{ github.run_id }}
+          path: backup-manifest.json
+          retention-days: 30
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Job 4: Deploy to Prod (CAB approval gate)
+  # ────────────────────────────────────────────────────────────────────────
+  deploy_prod:
+    name: Deploy to Prod
+    runs-on: ubuntu-latest
+    needs: deploy_preprod
+    environment: prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Backup current state
+        run: |
+          ./scripts/backup.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_PROD }}" \
+            "${{ env.PROXY_NAME }}" \
+            backup-manifest.json
+
+      - name: Check routing conflicts
+        id: change_report
+        run: |
+          TOKEN=$(gcloud auth print-access-token)
+          CURRENT_REV=$(jq -r '.revision' backup-manifest.json)
+          NEEDS_SEQUENCE=$(curl -sf -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/environments/${{ secrets.APIGEE_ENV_PROD }}/apis/${{ env.PROXY_NAME }}/revisions/${CURRENT_REV}/deployments:generateDeployChangeReport" | \
+            jq '[.routingChanges[]?.shouldSequenceRollout] | any' 2>/dev/null || echo "false")
+          echo "needs_sequence=${NEEDS_SEQUENCE}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy proxy (Maven — package + deploy via prod profile)
+        run: |
+          mvn install -P prod \
+            -Dapigee.org="${{ secrets.APIGEE_ORG }}" \
+            -Dapigee.sequencedRollout="${{ steps.change_report.outputs.needs_sequence }}" \
+            -Dbearer="$(gcloud auth print-access-token)"
+
+      - name: Health check
+        run: |
+          ./scripts/health-check.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_PROD }}" \
+            "${{ env.PROXY_NAME }}"
+
+      - name: Restore on failure
+        if: failure()
+        run: ./scripts/restore.sh backup-manifest.json
+
+      - name: Upload backup manifest
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-manifest-prod-${{ github.run_id }}
+          path: backup-manifest.json
+          retention-days: 30

@@ -1,0 +1,18 @@
+# GCP service account key — never commit
+apigee-cicd-sa-key.json
+*-sa-key.json
+
+# Maven build outputs
+target/
+
+# Backup manifests (runtime artifacts, not source)
+backup-manifest*.json
+
+# Lint output
+apigeelint-results*.json
+
+# macOS / editor
+.DS_Store
+.idea/
+.vscode/
+*.iml

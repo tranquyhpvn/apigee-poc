@@ -1,0 +1,48 @@
+name: Apigee Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to roll back
+        required: true
+        type: choice
+        options: [uat, preprod, prod]
+      run_id:
+        description: GitHub Actions run ID whose manifest to restore
+        required: true
+        type: string
+
+env:
+  PROXY_NAME: sample-api
+
+jobs:
+  rollback:
+    name: Rollback ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - run: chmod +x scripts/*.sh
+
+      - name: Download backup manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: backup-manifest-${{ github.event.inputs.environment }}-${{ github.event.inputs.run_id }}
+          path: .
+
+      - name: Show manifest being restored
+        run: cat backup-manifest.json | jq '{proxy, env, revision, timestamp}'
+
+      - name: Execute restore
+        run: ./scripts/restore.sh backup-manifest.json
+
+      - name: Health check
+        run: |
+          ./scripts/health-check.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "$(jq -r .env backup-manifest.json)" \
+            "${{ env.PROXY_NAME }}"

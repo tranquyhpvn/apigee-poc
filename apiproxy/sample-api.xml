@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<APIProxy revision="1" name="sample-api">
+    <Description>Sample proxy for backup/restore pipeline testing</Description>
+    <DisplayName>sample-api</DisplayName>
+    <Policies>
+        <Policy>KV-LookupBackendUrl</Policy>
+        <Policy>AM-SetTargetUrl</Policy>
+    </Policies>
+    <ProxyEndpoints>
+        <ProxyEndpoint>default</ProxyEndpoint>
+    </ProxyEndpoints>
+    <TargetEndpoints>
+        <TargetEndpoint>default</TargetEndpoint>
+    </TargetEndpoints>
+</APIProxy>
