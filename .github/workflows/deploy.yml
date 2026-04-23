@@ -115,6 +115,7 @@ jobs:
         run: |
           mvn install -P uat \
             -Dapigee.org="${{ secrets.APIGEE_ORG }}" \
+            -Dapigee.env="${{ secrets.APIGEE_ENV_UAT }}" \
             -Dapigee.sequencedRollout="${{ steps.change_report.outputs.needs_sequence }}" \
             -Dbearer="$(gcloud auth print-access-token)"
 
@@ -189,6 +190,7 @@ jobs:
         run: |
           mvn install -P preprod \
             -Dapigee.org="${{ secrets.APIGEE_ORG }}" \
+            -Dapigee.env="${{ secrets.APIGEE_ENV_PREPROD }}" \
             -Dapigee.sequencedRollout="${{ steps.change_report.outputs.needs_sequence }}" \
             -Dbearer="$(gcloud auth print-access-token)"
 
@@ -261,6 +263,7 @@ jobs:
         run: |
           mvn install -P prod \
             -Dapigee.org="${{ secrets.APIGEE_ORG }}" \
+            -Dapigee.env="${{ secrets.APIGEE_ENV_PROD }}" \
             -Dapigee.sequencedRollout="${{ steps.change_report.outputs.needs_sequence }}" \
             -Dbearer="$(gcloud auth print-access-token)"
 
