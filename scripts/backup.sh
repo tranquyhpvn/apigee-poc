@@ -12,15 +12,15 @@ TOKEN=$(gcloud auth print-access-token)
 BASE="https://apigee.googleapis.com/v1/organizations/${ORG}"
 
 echo "==> Fetching current deployed revision for ${PROXY} in ${ENV}..."
-DEPLOYED=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
-  "${BASE}/environments/${ENV}/apis/${PROXY}/deployments" | \
-  jq -r '.deployments[0].revision // empty')
+DEPLOYMENT_RESPONSE=$(curl -s -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE}/environments/${ENV}/apis/${PROXY}/deployments" || echo '{}')
+DEPLOYED=$(echo "${DEPLOYMENT_RESPONSE}" | jq -r '.deployments[0].revision // empty' 2>/dev/null || echo "")
 
 if [[ -z "${DEPLOYED}" ]]; then
-  echo "ERROR: No deployed revision found. Cannot create backup." >&2
-  exit 1
+  echo "    No prior deployment found — writing empty-revision manifest (first-deploy scenario)."
+else
+  echo "    Revision: ${DEPLOYED}"
 fi
-echo "    Revision: ${DEPLOYED}"
 
 echo "==> Fetching KVM entries for env ${ENV}..."
 KVM_NAMES=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
@@ -29,7 +29,7 @@ KVM_NAMES=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
 KVM_DATA="{}"
 for KVM in ${KVM_NAMES}; do
   ENTRIES=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
-    "${BASE}/environments/${ENV}/keyvaluemaps/${KVM}/entries?pageSize=200" | \
+    "${BASE}/environments/${ENV}/keyvaluemaps/${KVM}/entries?pageSize=100" | \
     jq '[.keyValueEntries[] | {name: .name, value: .value}]' 2>/dev/null || echo "[]")
   KVM_DATA=$(echo "${KVM_DATA}" | jq --arg k "${KVM}" --argjson v "${ENTRIES}" '. + {($k): $v}')
 done

@@ -11,12 +11,16 @@ REVISION=$(jq -r '.revision' "${MANIFEST}")
 TOKEN=$(gcloud auth print-access-token)
 BASE="https://apigee.googleapis.com/v1/organizations/${ORG}"
 
-echo "==> Restoring ${PROXY} rev ${REVISION} to ${ENV}..."
-curl -sf -X POST \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  "${BASE}/environments/${ENV}/apis/${PROXY}/revisions/${REVISION}/deployments?override=true" \
-  | jq '{state: .state, revision: .revision}'
+if [[ -n "${REVISION}" ]]; then
+  echo "==> Restoring ${PROXY} rev ${REVISION} to ${ENV}..."
+  curl -sf -X POST \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    "${BASE}/environments/${ENV}/apis/${PROXY}/revisions/${REVISION}/deployments?override=true" \
+    | jq '{state: .state, revision: .revision}'
+else
+  echo "==> No prior revision in manifest — skipping proxy re-deploy (first-deploy rollback)."
+fi
 
 echo "==> Restoring KVM entries..."
 jq -r '.kvms | to_entries[] | "\(.key) \(.value | @json)"' "${MANIFEST}" | \

@@ -126,7 +126,7 @@ jobs:
             "${{ env.PROXY_NAME }}"
 
       - name: Restore on failure
-        if: failure()
+        if: failure() && hashFiles('backup-manifest.json') != ''
         run: |
           echo "==> Deploy or health check failed — triggering restore..."
           ./scripts/restore.sh backup-manifest.json
@@ -200,7 +200,7 @@ jobs:
             "${{ env.PROXY_NAME }}"
 
       - name: Restore on failure
-        if: failure()
+        if: failure() && hashFiles('backup-manifest.json') != ''
         run: ./scripts/restore.sh backup-manifest.json
 
       - name: Upload backup manifest
@@ -272,7 +272,7 @@ jobs:
             "${{ env.PROXY_NAME }}"
 
       - name: Restore on failure
-        if: failure()
+        if: failure() && hashFiles('backup-manifest.json') != ''
         run: ./scripts/restore.sh backup-manifest.json
 
       - name: Upload backup manifest
