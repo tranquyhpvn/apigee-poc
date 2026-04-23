@@ -11,12 +11,17 @@
   <packaging>pom</packaging>
   <name>sample-api</name>
 
+  <properties>
+    <apigee.apiversion>googleapi</apigee.apiversion>
+    <apigee.options>override</apigee.options>
+  </properties>
+
   <build>
     <plugins>
       <plugin>
-        <groupId>com.apigee.edge</groupId>
+        <groupId>io.apigee.build-tools.enterprise4g</groupId>
         <artifactId>apigee-edge-maven-plugin</artifactId>
-        <version>2.4.0</version>
+        <version>2.5.2</version>
         <executions>
           <execution>
             <id>configure-bundle</id>
@@ -30,9 +35,11 @@
           </execution>
         </executions>
         <configuration>
+          <apiVersion>${apigee.apiversion}</apiVersion>
           <org>${apigee.org}</org>
           <env>${apigee.env}</env>
-          <override>true</override>
+          <bearer>${bearer}</bearer>
+          <options>${apigee.options}</options>
           <sequencedRollout>${apigee.sequencedRollout}</sequencedRollout>
         </configuration>
       </plugin>
