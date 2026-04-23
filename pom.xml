@@ -13,6 +13,7 @@
 
   <properties>
     <apigee.apiversion>googleapi</apigee.apiversion>
+    <apigee.hosturl>https://apigee.googleapis.com</apigee.hosturl>
     <apigee.options>override</apigee.options>
   </properties>
 
@@ -58,6 +59,7 @@
         </executions>
         <configuration>
           <apiVersion>${apigee.apiversion}</apiVersion>
+          <hostURL>${apigee.hosturl}</hostURL>
           <org>${apigee.org}</org>
           <env>${apigee.env}</env>
           <bearer>${bearer}</bearer>
