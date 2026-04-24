@@ -40,7 +40,9 @@ jobs:
         run: npm install -g apigeelint
 
       - name: Run apigeelint
-        run: apigeelint -s apiproxy/ -f table.js
+        run: |
+          apigeelint -s apiproxy/ -f json.js > apigeelint-results.json || true
+          apigeelint -s apiproxy/ -f table.js
 
       - name: Install eslint (if JS resources exist)
         run: |
@@ -61,7 +63,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apigeelint-results
-          path: '*.json'
+          path: apigeelint-results.json
           retention-days: 7
 
   # ────────────────────────────────────────────────────────────────────────
