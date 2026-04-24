@@ -12,12 +12,19 @@ TOKEN=$(gcloud auth print-access-token)
 BASE="https://apigee.googleapis.com/v1/organizations/${ORG}"
 
 if [[ -n "${REVISION}" ]]; then
-  echo "==> Restoring ${PROXY} rev ${REVISION} to ${ENV}..."
-  curl -sf -X POST \
-    -H "Authorization: Bearer ${TOKEN}" \
-    -H "Content-Type: application/json" \
-    "${BASE}/environments/${ENV}/apis/${PROXY}/revisions/${REVISION}/deployments?override=true" \
-    | jq '{state: .state, revision: .revision}'
+  CURRENT=$(curl -s -H "Authorization: Bearer ${TOKEN}" \
+    "${BASE}/environments/${ENV}/apis/${PROXY}/deployments" | \
+    jq -r '.deployments[0].revision // empty')
+  if [[ "${CURRENT}" == "${REVISION}" ]]; then
+    echo "==> Rev ${REVISION} already deployed to ${ENV} — skipping re-deploy."
+  else
+    echo "==> Restoring ${PROXY} rev ${REVISION} to ${ENV} (current: ${CURRENT:-none})..."
+    curl -sf -X POST \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      "${BASE}/environments/${ENV}/apis/${PROXY}/revisions/${REVISION}/deployments?override=true" \
+      | jq '{state: .state, revision: .revision}'
+  fi
 else
   echo "==> No prior revision in manifest — skipping proxy re-deploy (first-deploy rollback)."
 fi
