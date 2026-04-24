@@ -3,7 +3,7 @@
     <Description>Backend target — resolved via named target server</Description>
     <HTTPTargetConnection>
         <LoadBalancer>
-            <Server name="postman-echo-ts"/>
+            <Server name="httpbin-ts"/>
         </LoadBalancer>
         <Path/>
     </HTTPTargetConnection>

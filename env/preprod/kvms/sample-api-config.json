@@ -2,6 +2,6 @@
   "name": "sample-api-config",
   "encrypted": false,
   "entries": [
-    {"name": "api-version-label", "value": "v2 (postman-echo)"}
+    {"name": "api-version-label", "value": "v1 (httpbin)"}
   ]
 }
