@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<AssignMessage name="AM-SetTargetUrl">
-    <AssignVariable>
-        <Name>target.url</Name>
-        <Ref>private.backend_url</Ref>
-    </AssignVariable>
-    <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
-</AssignMessage>

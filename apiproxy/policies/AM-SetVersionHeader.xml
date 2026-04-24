@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<AssignMessage name="AM-SetVersionHeader">
+    <AssignTo createNew="false" type="response"/>
+    <Add>
+        <Headers>
+            <Header name="X-API-Version">{private.api_version}</Header>
+        </Headers>
+    </Add>
+    <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

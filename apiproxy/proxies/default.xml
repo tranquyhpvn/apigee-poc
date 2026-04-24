@@ -7,14 +7,15 @@
     <FaultRules/>
     <PreFlow name="PreFlow">
         <Request>
-            <Step><Name>KV-LookupBackendUrl</Name></Step>
-            <Step><Name>AM-SetTargetUrl</Name></Step>
+            <Step><Name>KV-LookupVersion</Name></Step>
         </Request>
         <Response/>
     </PreFlow>
     <PostFlow name="PostFlow">
         <Request/>
-        <Response/>
+        <Response>
+            <Step><Name>AM-SetVersionHeader</Name></Step>
+        </Response>
     </PostFlow>
     <Flows/>
     <RouteRule name="default">
