@@ -9,11 +9,11 @@ on:
         type: choice
         options: [uat, preprod, prod]
       revision:
-        description: Revision number to roll back to (e.g., 14)
-        required: true
+        description: Revision (optional — leave blank to auto-pick most recent backup)
+        required: false
         type: string
       run_id:
-        description: GitHub Actions run ID for full restore (optional — leave blank for proxy-only)
+        description: Run ID (optional — leave blank to auto-resolve from artifact)
         required: false
         type: string
       dry_run:
@@ -27,7 +27,7 @@ env:
 
 jobs:
   rollback:
-    name: Rollback ${{ github.event.inputs.environment }} to rev ${{ github.event.inputs.revision }}
+    name: Rollback ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
@@ -46,24 +46,84 @@ jobs:
             prod)    echo "value=${{ secrets.APIGEE_ENV_PROD }}" >> "$GITHUB_OUTPUT" ;;
           esac
 
-      - name: Download backup manifest (if run_id given)
-        if: github.event.inputs.run_id != ''
+      - name: List recent backups (summary)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/list-backups.sh "${{ github.event.inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve target revision and run_id
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ENV_NAME="${{ github.event.inputs.environment }}"
+          REV="${{ github.event.inputs.revision }}"
+          RID="${{ github.event.inputs.run_id }}"
+
+          # If both provided, use as-is
+          if [[ -n "$REV" && -n "$RID" ]]; then
+            echo "==> Using user-provided rev=$REV run_id=$RID (full restore)"
+            echo "revision=$REV" >> "$GITHUB_OUTPUT"
+            echo "run_id=$RID"   >> "$GITHUB_OUTPUT"
+            echo "mode=full"     >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PATTERN="^backup-manifest-${ENV_NAME}-rev[0-9]+-[0-9]+$"
+          ARTIFACTS=$(gh api "repos/${{ github.repository }}/actions/artifacts" --paginate \
+            --jq ".artifacts[] | select(.name | test(\"${PATTERN}\")) | select(.expired == false) | {name, created_at}" \
+            | jq -s 'sort_by(.created_at) | reverse')
+
+          # Case: revision empty → auto-pick most recent (full restore)
+          if [[ -z "$REV" ]]; then
+            LATEST=$(echo "$ARTIFACTS" | jq -r '.[0].name // empty')
+            if [[ -z "$LATEST" ]]; then
+              echo "ERROR: no backup artifacts found for ${ENV_NAME}" >&2
+              exit 1
+            fi
+            REV=$(echo "$LATEST" | sed -E 's/.*-rev([0-9]+)-[0-9]+$/\1/')
+            RID=$(echo "$LATEST" | sed -E 's/.*-rev[0-9]+-([0-9]+)$/\1/')
+            echo "==> Auto-picked most recent: rev=$REV run_id=$RID (full restore)"
+            echo "revision=$REV" >> "$GITHUB_OUTPUT"
+            echo "run_id=$RID"   >> "$GITHUB_OUTPUT"
+            echo "mode=full"     >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Case: revision given but no run_id → look up artifact for that rev
+          MATCH=$(echo "$ARTIFACTS" | jq -r --arg r "$REV" \
+            '.[] | select(.name | test("-rev" + $r + "-")) | .name' | head -1)
+          if [[ -n "$MATCH" ]]; then
+            RID=$(echo "$MATCH" | sed -E 's/.*-rev[0-9]+-([0-9]+)$/\1/')
+            echo "==> Found artifact for rev=$REV → run_id=$RID (full restore)"
+            echo "revision=$REV" >> "$GITHUB_OUTPUT"
+            echo "run_id=$RID"   >> "$GITHUB_OUTPUT"
+            echo "mode=full"     >> "$GITHUB_OUTPUT"
+          else
+            echo "==> No artifact found for rev=$REV — proxy-only restore"
+            echo "revision=$REV" >> "$GITHUB_OUTPUT"
+            echo "run_id="       >> "$GITHUB_OUTPUT"
+            echo "mode=proxy"    >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download backup manifest (full restore)
+        if: steps.resolve.outputs.mode == 'full'
         uses: actions/download-artifact@v4
         with:
-          name: backup-manifest-${{ github.event.inputs.environment }}-rev${{ github.event.inputs.revision }}-${{ github.event.inputs.run_id }}
+          name: backup-manifest-${{ github.event.inputs.environment }}-rev${{ steps.resolve.outputs.revision }}-${{ steps.resolve.outputs.run_id }}
           path: .
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          run-id: ${{ github.event.inputs.run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
 
-      - name: Synthesize minimal manifest (if no run_id — proxy-only restore)
-        if: github.event.inputs.run_id == ''
+      - name: Synthesize minimal manifest (proxy-only restore)
+        if: steps.resolve.outputs.mode == 'proxy'
         run: |
           jq -n \
             --arg org "${{ secrets.APIGEE_ORG }}" \
             --arg env "${{ steps.env_secret.outputs.value }}" \
             --arg proxy "${{ env.PROXY_NAME }}" \
-            --arg revision "${{ github.event.inputs.revision }}" \
+            --arg revision "${{ steps.resolve.outputs.revision }}" \
             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{org: $org, env: $env, proxy: $proxy, revision: $revision,
               timestamp: $timestamp, kvms: {}, target_servers: {}}' \

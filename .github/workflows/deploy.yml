@@ -154,6 +154,12 @@ jobs:
           path: backup-manifest.json
           retention-days: 30
 
+      - name: List recent backups (summary)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/list-backups.sh uat >> "$GITHUB_STEP_SUMMARY"
+
   # ────────────────────────────────────────────────────────────────────────
   # Job 3: Restore UAT (manual-gated, on deploy failure)
   # ────────────────────────────────────────────────────────────────────────
@@ -284,6 +290,12 @@ jobs:
           path: backup-manifest.json
           retention-days: 30
 
+      - name: List recent backups (summary)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/list-backups.sh preprod >> "$GITHUB_STEP_SUMMARY"
+
   # ────────────────────────────────────────────────────────────────────────
   # Job 5: Restore PreProd (manual-gated, on deploy failure)
   # ────────────────────────────────────────────────────────────────────────
@@ -413,6 +425,12 @@ jobs:
           name: ${{ steps.artifact_name.outputs.name }}
           path: backup-manifest.json
           retention-days: 30
+
+      - name: List recent backups (summary)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/list-backups.sh prod >> "$GITHUB_STEP_SUMMARY"
 
   # ────────────────────────────────────────────────────────────────────────
   # Job 7: Restore Prod (manual-gated, on deploy failure)

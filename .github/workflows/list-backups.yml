@@ -1,0 +1,30 @@
+name: List Backups
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment
+        required: true
+        type: choice
+        options: [uat, preprod, prod]
+      limit:
+        description: How many recent backups to show
+        required: false
+        default: '20'
+        type: string
+
+jobs:
+  list:
+    name: List backups for ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x scripts/*.sh
+      - name: List recent backups
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./scripts/list-backups.sh \
+            "${{ github.event.inputs.environment }}" \
+            "${{ github.event.inputs.limit }}" >> "$GITHUB_STEP_SUMMARY"
