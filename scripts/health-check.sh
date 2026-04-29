@@ -12,16 +12,19 @@ for attempt in 1 2 3 4 5; do
   RESPONSE=$(curl -sf \
     -H "Authorization: Bearer ${TOKEN}" \
     "https://apigee.googleapis.com/v1/organizations/${ORG}/environments/${ENV}/apis/${PROXY}/deployments")
-  REVISION=$(echo "${RESPONSE}" | jq -r '.deployments[0].revision // empty')
-  STATE=$(echo "${RESPONSE}" | jq -r '.deployments[0].state // empty')
 
-  if [[ -n "${REVISION}" && ( -z "${STATE}" || "${STATE}" == "READY" ) ]]; then
-    echo "    Revision ${REVISION} deployed${STATE:+ (state: ${STATE})}"
+  # During sequenced rollouts there can be >1 deployment briefly. Require ALL READY.
+  ALL_READY=$(echo "${RESPONSE}" | jq '[.deployments[]?.state // "READY"] | all(. == "READY")')
+  LATEST_REV=$(echo "${RESPONSE}" | jq -r '[.deployments[]?.revision | tonumber] | max // empty')
+  REV_STATES=$(echo "${RESPONSE}" | jq -r '[.deployments[]? | "rev\(.revision)=\(.state // "READY")"] | join(",")')
+
+  if [[ "${ALL_READY}" == "true" && -n "${LATEST_REV}" ]]; then
+    echo "    Latest revision: ${LATEST_REV} (deployments: ${REV_STATES:-none})"
     echo "==> Health check passed."
     exit 0
   fi
 
-  echo "    Attempt ${attempt}: revision=${REVISION:-none} state=${STATE:-<none>} — retrying..."
+  echo "    Attempt ${attempt}: deployments=[${REV_STATES:-none}] — retrying..."
   sleep 10
 done
 

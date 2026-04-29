@@ -27,23 +27,29 @@ KVM_NAMES=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
   "${BASE}/environments/${ENV}/keyvaluemaps" | jq -r '.[]' 2>/dev/null || echo "")
 
 KVM_DATA="{}"
-for KVM in ${KVM_NAMES}; do
+# NOTE: must use 'while read' not 'for' — zsh does not word-split on embedded
+# newlines inside variables, so 'for KVM in ${KVM_NAMES}' iterates only once
+# with all names joined as a single token. 'while read' splits on actual newlines.
+while IFS= read -r KVM; do
+  [[ -z "${KVM}" ]] && continue
   ENTRIES=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
     "${BASE}/environments/${ENV}/keyvaluemaps/${KVM}/entries?pageSize=100" | \
     jq '[.keyValueEntries[] | {name: .name, value: .value}]' 2>/dev/null || echo "[]")
   KVM_DATA=$(echo "${KVM_DATA}" | jq --arg k "${KVM}" --argjson v "${ENTRIES}" '. + {($k): $v}')
-done
+done <<< "${KVM_NAMES}"
 
 echo "==> Fetching target servers for env ${ENV}..."
 TS_NAMES=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
   "${BASE}/environments/${ENV}/targetservers" | jq -r '.[]' 2>/dev/null || echo "")
 
 TARGET_SERVERS="{}"
-for TS in ${TS_NAMES}; do
+# NOTE: same reason as KVM loop above — must use 'while read' not 'for'.
+while IFS= read -r TS; do
+  [[ -z "${TS}" ]] && continue
   DETAIL=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
     "${BASE}/environments/${ENV}/targetservers/${TS}" 2>/dev/null || echo "{}")
   TARGET_SERVERS=$(echo "${TARGET_SERVERS}" | jq --arg k "${TS}" --argjson v "${DETAIL}" '. + {($k): $v}')
-done
+done <<< "${TS_NAMES}"
 
 jq -S -n \
   --arg org "${ORG}" \
