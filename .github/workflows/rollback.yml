@@ -70,9 +70,10 @@ jobs:
             > backup-manifest.json
 
       - name: Show manifest summary
-        run: jq '{org, env, proxy, revision, timestamp,
-                 kvm_count: (.kvms | length),
-                 target_server_count: (.target_servers | length)}' backup-manifest.json
+        run: |
+          jq '{org, env, proxy, revision, timestamp,
+               kvm_count: (.kvms | length),
+               target_server_count: (.target_servers | length)}' backup-manifest.json
 
       - name: Restore plan (dry-run)
         run: ./scripts/restore.sh --dry-run backup-manifest.json
