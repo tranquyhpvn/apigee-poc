@@ -8,17 +8,26 @@ on:
         required: true
         type: choice
         options: [uat, preprod, prod]
-      run_id:
-        description: GitHub Actions run ID whose manifest to restore
+      revision:
+        description: Revision number to roll back to (e.g., 14)
         required: true
         type: string
+      run_id:
+        description: GitHub Actions run ID for full restore (optional — leave blank for proxy-only)
+        required: false
+        type: string
+      dry_run:
+        description: Preview only — print plan without executing
+        required: false
+        type: boolean
+        default: false
 
 env:
   PROXY_NAME: sample-api
 
 jobs:
   rollback:
-    name: Rollback ${{ github.event.inputs.environment }}
+    name: Rollback ${{ github.event.inputs.environment }} to rev ${{ github.event.inputs.revision }}
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
@@ -28,24 +37,62 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       - run: chmod +x scripts/*.sh
 
-      - name: Download backup manifest
+      - name: Resolve env secret
+        id: env_secret
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            uat)     echo "value=${{ secrets.APIGEE_ENV_UAT }}" >> "$GITHUB_OUTPUT" ;;
+            preprod) echo "value=${{ secrets.APIGEE_ENV_PREPROD }}" >> "$GITHUB_OUTPUT" ;;
+            prod)    echo "value=${{ secrets.APIGEE_ENV_PROD }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Download backup manifest (if run_id given)
+        if: github.event.inputs.run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: backup-manifest-${{ github.event.inputs.environment }}-${{ github.event.inputs.run_id }}
+          name: backup-manifest-${{ github.event.inputs.environment }}-rev${{ github.event.inputs.revision }}-${{ github.event.inputs.run_id }}
           path: .
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
           run-id: ${{ github.event.inputs.run_id }}
 
-      - name: Show manifest being restored
-        run: cat backup-manifest.json | jq '{proxy, env, revision, timestamp}'
+      - name: Synthesize minimal manifest (if no run_id — proxy-only restore)
+        if: github.event.inputs.run_id == ''
+        run: |
+          jq -n \
+            --arg org "${{ secrets.APIGEE_ORG }}" \
+            --arg env "${{ steps.env_secret.outputs.value }}" \
+            --arg proxy "${{ env.PROXY_NAME }}" \
+            --arg revision "${{ github.event.inputs.revision }}" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{org: $org, env: $env, proxy: $proxy, revision: $revision,
+              timestamp: $timestamp, kvms: {}, target_servers: {}}' \
+            > backup-manifest.json
+
+      - name: Show manifest summary
+        run: jq '{org, env, proxy, revision, timestamp,
+                 kvm_count: (.kvms | length),
+                 target_server_count: (.target_servers | length)}' backup-manifest.json
+
+      - name: Restore plan (dry-run)
+        run: ./scripts/restore.sh --dry-run backup-manifest.json
+
+      - name: Stop here (dry-run mode)
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          echo "════════════════════════════════════════════════════════════"
+          echo "  dry_run=true — exiting after preview. No changes applied."
+          echo "  Re-dispatch with dry_run=false to execute the restore."
+          echo "════════════════════════════════════════════════════════════"
 
       - name: Execute restore
+        if: github.event.inputs.dry_run != 'true'
         run: ./scripts/restore.sh backup-manifest.json
 
       - name: Health check
+        if: github.event.inputs.dry_run != 'true'
         run: |
           ./scripts/health-check.sh \
             "${{ secrets.APIGEE_ORG }}" \
-            "$(jq -r .env backup-manifest.json)" \
+            "${{ steps.env_secret.outputs.value }}" \
             "${{ env.PROXY_NAME }}"

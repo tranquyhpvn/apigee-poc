@@ -1,5 +1,5 @@
 # ============================================================================
-# deploy.yml — Apigee proxy deploy pipeline with lint + backup/restore
+# deploy.yml — Apigee proxy deploy pipeline with lint + backup/manual-gated restore
 # ============================================================================
 name: Apigee Deploy
 
@@ -74,6 +74,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     environment: uat
+    outputs:
+      manifest_artifact: ${{ steps.artifact_name.outputs.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,6 +101,15 @@ jobs:
             "${{ secrets.APIGEE_ENV_UAT }}" \
             "${{ env.PROXY_NAME }}" \
             backup-manifest.json
+
+      - name: Read revision from manifest
+        id: backup_rev
+        run: echo "rev=$(jq -r '.revision // "none"' backup-manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute artifact name
+        id: artifact_name
+        if: always()
+        run: echo "name=backup-manifest-uat-rev${{ steps.backup_rev.outputs.rev }}-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Sync KVM state from git
         run: |
@@ -135,28 +146,67 @@ jobs:
             "${{ secrets.APIGEE_ENV_UAT }}" \
             "${{ env.PROXY_NAME }}"
 
-      - name: Restore on failure
-        if: failure() && hashFiles('backup-manifest.json') != ''
-        run: |
-          echo "==> Deploy or health check failed — triggering restore..."
-          ./scripts/restore.sh backup-manifest.json
-
       - name: Upload backup manifest
-        if: success()
+        if: always() && hashFiles('backup-manifest.json') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: backup-manifest-uat-${{ github.run_id }}
+          name: ${{ steps.artifact_name.outputs.name }}
           path: backup-manifest.json
           retention-days: 30
 
   # ────────────────────────────────────────────────────────────────────────
-  # Job 3: Deploy to PreProd (approval gate)
+  # Job 3: Restore UAT (manual-gated, on deploy failure)
+  # ────────────────────────────────────────────────────────────────────────
+  restore_uat:
+    name: Restore UAT (gated)
+    runs-on: ubuntu-latest
+    needs: deploy_uat
+    if: failure() && needs.deploy_uat.result == 'failure'
+    environment: uat-restore-approval
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Download backup manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.deploy_uat.outputs.manifest_artifact }}
+          path: .
+
+      - name: Show manifest summary
+        run: jq '{org, env, proxy, revision, timestamp}' backup-manifest.json
+
+      - name: Restore plan (dry-run)
+        run: ./scripts/restore.sh --dry-run backup-manifest.json
+
+      - name: Execute restore
+        run: ./scripts/restore.sh backup-manifest.json
+
+      - name: Health check
+        run: |
+          ./scripts/health-check.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_UAT }}" \
+            "${{ env.PROXY_NAME }}"
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Job 4: Deploy to PreProd (approval gate)
   # ────────────────────────────────────────────────────────────────────────
   deploy_preprod:
     name: Deploy to PreProd
     runs-on: ubuntu-latest
     needs: deploy_uat
     environment: preprod
+    outputs:
+      manifest_artifact: ${{ steps.artifact_name.outputs.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -182,6 +232,15 @@ jobs:
             "${{ secrets.APIGEE_ENV_PREPROD }}" \
             "${{ env.PROXY_NAME }}" \
             backup-manifest.json
+
+      - name: Read revision from manifest
+        id: backup_rev
+        run: echo "rev=$(jq -r '.revision // "none"' backup-manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute artifact name
+        id: artifact_name
+        if: always()
+        run: echo "name=backup-manifest-preprod-rev${{ steps.backup_rev.outputs.rev }}-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Sync KVM state from git
         run: |
@@ -217,26 +276,67 @@ jobs:
             "${{ secrets.APIGEE_ENV_PREPROD }}" \
             "${{ env.PROXY_NAME }}"
 
-      - name: Restore on failure
-        if: failure() && hashFiles('backup-manifest.json') != ''
-        run: ./scripts/restore.sh backup-manifest.json
-
       - name: Upload backup manifest
-        if: success()
+        if: always() && hashFiles('backup-manifest.json') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: backup-manifest-preprod-${{ github.run_id }}
+          name: ${{ steps.artifact_name.outputs.name }}
           path: backup-manifest.json
           retention-days: 30
 
   # ────────────────────────────────────────────────────────────────────────
-  # Job 4: Deploy to Prod (CAB approval gate)
+  # Job 5: Restore PreProd (manual-gated, on deploy failure)
+  # ────────────────────────────────────────────────────────────────────────
+  restore_preprod:
+    name: Restore PreProd (gated)
+    runs-on: ubuntu-latest
+    needs: deploy_preprod
+    if: failure() && needs.deploy_preprod.result == 'failure'
+    environment: preprod-restore-approval
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Download backup manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.deploy_preprod.outputs.manifest_artifact }}
+          path: .
+
+      - name: Show manifest summary
+        run: jq '{org, env, proxy, revision, timestamp}' backup-manifest.json
+
+      - name: Restore plan (dry-run)
+        run: ./scripts/restore.sh --dry-run backup-manifest.json
+
+      - name: Execute restore
+        run: ./scripts/restore.sh backup-manifest.json
+
+      - name: Health check
+        run: |
+          ./scripts/health-check.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_PREPROD }}" \
+            "${{ env.PROXY_NAME }}"
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Job 6: Deploy to Prod (CAB approval gate)
   # ────────────────────────────────────────────────────────────────────────
   deploy_prod:
     name: Deploy to Prod
     runs-on: ubuntu-latest
     needs: deploy_preprod
     environment: prod
+    outputs:
+      manifest_artifact: ${{ steps.artifact_name.outputs.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -262,6 +362,15 @@ jobs:
             "${{ secrets.APIGEE_ENV_PROD }}" \
             "${{ env.PROXY_NAME }}" \
             backup-manifest.json
+
+      - name: Read revision from manifest
+        id: backup_rev
+        run: echo "rev=$(jq -r '.revision // "none"' backup-manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute artifact name
+        id: artifact_name
+        if: always()
+        run: echo "name=backup-manifest-prod-rev${{ steps.backup_rev.outputs.rev }}-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Sync KVM state from git
         run: |
@@ -297,14 +406,53 @@ jobs:
             "${{ secrets.APIGEE_ENV_PROD }}" \
             "${{ env.PROXY_NAME }}"
 
-      - name: Restore on failure
-        if: failure() && hashFiles('backup-manifest.json') != ''
-        run: ./scripts/restore.sh backup-manifest.json
-
       - name: Upload backup manifest
-        if: success()
+        if: always() && hashFiles('backup-manifest.json') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: backup-manifest-prod-${{ github.run_id }}
+          name: ${{ steps.artifact_name.outputs.name }}
           path: backup-manifest.json
           retention-days: 30
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Job 7: Restore Prod (manual-gated, on deploy failure)
+  # ────────────────────────────────────────────────────────────────────────
+  restore_prod:
+    name: Restore Prod (gated)
+    runs-on: ubuntu-latest
+    needs: deploy_prod
+    if: failure() && needs.deploy_prod.result == 'failure'
+    environment: prod-restore-approval
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Download backup manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.deploy_prod.outputs.manifest_artifact }}
+          path: .
+
+      - name: Show manifest summary
+        run: jq '{org, env, proxy, revision, timestamp}' backup-manifest.json
+
+      - name: Restore plan (dry-run)
+        run: ./scripts/restore.sh --dry-run backup-manifest.json
+
+      - name: Execute restore
+        run: ./scripts/restore.sh backup-manifest.json
+
+      - name: Health check
+        run: |
+          ./scripts/health-check.sh \
+            "${{ secrets.APIGEE_ORG }}" \
+            "${{ secrets.APIGEE_ENV_PROD }}" \
+            "${{ env.PROXY_NAME }}"
