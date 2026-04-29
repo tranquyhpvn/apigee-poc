@@ -4,27 +4,36 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: Environment
-        required: true
+        description: Environment (default — all)
+        required: false
         type: choice
-        options: [uat, preprod, prod]
+        default: all
+        options: [all, uat, preprod, prod]
       limit:
-        description: How many recent backups to show
+        description: How many recent backups to show per env
         required: false
         default: '20'
         type: string
 
 jobs:
   list:
-    name: List backups for ${{ github.event.inputs.environment }}
+    name: List backups (${{ github.event.inputs.environment }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: chmod +x scripts/*.sh
+
       - name: List recent backups
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENV_INPUT: ${{ github.event.inputs.environment }}
+          LIMIT: ${{ github.event.inputs.limit }}
         run: |
-          ./scripts/list-backups.sh \
-            "${{ github.event.inputs.environment }}" \
-            "${{ github.event.inputs.limit }}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${ENV_INPUT}" == "all" ]]; then
+            ENVS=(uat preprod prod)
+          else
+            ENVS=("${ENV_INPUT}")
+          fi
+          for E in "${ENVS[@]}"; do
+            ./scripts/list-backups.sh "$E" "${LIMIT}" >> "$GITHUB_STEP_SUMMARY"
+          done
